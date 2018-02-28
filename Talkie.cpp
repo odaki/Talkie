@@ -10,6 +10,10 @@
 #endif
 #include "Talkie.h"
 
+#if F_CPU >= 16000000L
+#define HIGHQUALITY
+#endif
+
 #define FS 8000 // Speech engine sample rate
 
 static void timerInterrupt();
@@ -27,8 +31,13 @@ const uint8_t spStopSay[]    PROGMEM = { 0x0F};	// This is a special sound to cl
 
 static const uint8_t tmsEnergy[0x10] = {0x00,0x02,0x03,0x04,0x05,0x07,0x0a,0x0f,0x14,0x20,0x29,0x39,0x51,0x72,0xa1,0xff};
 static const uint8_t tmsPeriod[0x40] = {0x00,0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2D,0x2F,0x31,0x33,0x35,0x36,0x39,0x3B,0x3D,0x3F,0x42,0x45,0x47,0x49,0x4D,0x4F,0x51,0x55,0x57,0x5C,0x5F,0x63,0x66,0x6A,0x6E,0x73,0x77,0x7B,0x80,0x85,0x8A,0x8F,0x95,0x9A,0xA0};
+#ifdef HIGHQUALITY
 static const uint16_t tmsK1[0x20]     = {0x82C0,0x8380,0x83C0,0x8440,0x84C0,0x8540,0x8600,0x8780,0x8880,0x8980,0x8AC0,0x8C00,0x8D40,0x8F00,0x90C0,0x92C0,0x9900,0xA140,0xAB80,0xB840,0xC740,0xD8C0,0xEBC0,0x0000,0x1440,0x2740,0x38C0,0x47C0,0x5480,0x5EC0,0x6700,0x6D40};
 static const uint16_t tmsK2[0x20]     = {0xAE00,0xB480,0xBB80,0xC340,0xCB80,0xD440,0xDDC0,0xE780,0xF180,0xFBC0,0x0600,0x1040,0x1A40,0x2400,0x2D40,0x3600,0x3E40,0x45C0,0x4CC0,0x5300,0x5880,0x5DC0,0x6240,0x6640,0x69C0,0x6CC0,0x6F80,0x71C0,0x73C0,0x7580,0x7700,0x7E80};
+#else
+static const uint8_t tmsK1[0x20]     =  {0x83,0x84,0x84,0x84,0x85,0x85,0x86,0x88,0x89,0x8A,0x8B,0x8C,0x8D,0x8F,0x91,0x93,0x99,0xA1,0xAC,0xB8,0xC7,0xD9,0xEC,0x00,0x14,0x27,0x39,0x48,0x55,0x5F,0x67,0x6D};
+static const uint8_t tmsK2[0x20]     =  {0xAE,0xB5,0xBC,0xC3,0xCC,0xD4,0xDE,0xE8,0xF2,0xFC,0x06,0x10,0x1A,0x24,0x2D,0x36,0x3E,0x46,0x4D,0x53,0x59,0x5E,0x62,0x66,0x6A,0x6D,0x70,0x72,0x74,0x76,0x77,0x7F};
+#endif
 static const uint8_t tmsK3[0x10]      = {0x92,0x9F,0xAD,0xBA,0xC8,0xD5,0xE3,0xF0,0xFE,0x0B,0x19,0x26,0x34,0x41,0x4F,0x5C};
 static const uint8_t tmsK4[0x10]      = {0xAE,0xBC,0xCA,0xD8,0xE6,0xF4,0x01,0x0F,0x1D,0x2B,0x39,0x47,0x55,0x63,0x71,0x7E};
 static const uint8_t tmsK5[0x10]      = {0xAE,0xBA,0xC5,0xD1,0xDD,0xE8,0xF4,0xFF,0x0B,0x17,0x22,0x2E,0x39,0x45,0x51,0x5C};
@@ -108,16 +117,58 @@ const uint8_t * Talkie::say_remove() {
 	return addr;
 }	// say_remove()
 
+#if defined(__AVR__)
+
+#if defined(__AVR_ATmega32U4__)
+#ifdef ARDUINO_AVR_ESPLORA
+const int PWM_PIN = 6;
+#define PWM_VALUE_DESTINATION     OCR4D
+//#elif (F_CPU==8000000l) // Lilypad USB FLORA and EXPRESS
+#else
+const int PWM_PIN = 10;
+#define PWM_COMPLEMENTARY 9
+#define PWM_VALUE_DESTINATION     OCR4B
+#endif
+#else
+const int PWM_PIN = 3;
+#define PWM_VALUE_DESTINATION     OCR2B
+
+#endif
+
+#endif
+
+
 int8_t Talkie::sayQ(const uint8_t * addr) {
 	if (!setup) {
 		// Auto-setup.
 		// 
 		// Enable the speech system whenever say() is called.
+
+        
 #if defined(__AVR__)
-#if F_CPU != 16000000L
-#error "F_CPU must be 16 MHz"
+#if defined(__AVR_ATmega32U4__)
+#ifdef ARDUINO_AVR_ESPLORA
+        TCCR4A = 0;
+        TCCR4B = _BV(CS40);
+        TCCR4C = _BV(COM4D1)|_BV(COM4D0) |_BV(PWM4D); //
+        TCCR4D = _BV(WGM40);
+        TC4H = 0x0;
+        OCR4C = 0xff;
+        //  TCCR4E= _BV(ENHC4);
+        //        TIMSK4 =_BV(TOIE4);
+        TIMSK4 = 0;
+#else
+    
+        TCCR4A =  _BV(COM4B1 )|_BV(PWM4B);
+        TCCR4B = _BV(CS40);
+        OCR4C = 0;
+        TCCR4D = 0;
+        TC4H = 0x0;
+          TCCR4E= _BV(ENHC4);
+        //TIMSK4 =_BV(TOIE4);
+        TIMSK4 = 0;
 #endif
-		pinMode(3,OUTPUT);
+#else
 		// Timer 2 set up as a 62500Hz PWM.
 		//
 		// The PWM 'buzz' is well above human hearing range and is
@@ -126,7 +177,6 @@ int8_t Talkie::sayQ(const uint8_t * addr) {
 		TCCR2A = _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
 		TCCR2B = _BV(CS20);
 		TIMSK2 = 0;
-		
 		// Unfortunately we can't calculate the next sample every PWM cycle
 		// as the routine is too slow. So use Timer 1 to trigger that.
 		
@@ -136,6 +186,15 @@ int8_t Talkie::sayQ(const uint8_t * addr) {
 		TCNT1 = 0;
 		OCR1A = F_CPU / FS;
 		TIMSK1 = _BV(OCIE1A);
+#endif
+        pinMode(PWM_PIN,OUTPUT);
+#ifdef PWM_COMPLEMENTARY
+        pinMode( PWM_COMPLEMENTARY, OUTPUT);
+#endif
+
+#endif
+        
+#if defined(__AVR__)
 #define ISR_RATIO (25000/ (F_CPU / FS) )
 #elif defined(__arm__) && defined(CORE_TEENSY)
 #define ISR(f) void f(void)
@@ -178,7 +237,11 @@ ISR(TIMER1_COMPA_vect) {
 }
 
 static void timerInterrupt() {
-	static uint8_t nextPwm;
+#if defined(__arm__) && defined(CORE_TEENSY)
+    static unsigned  nextPwm;
+#else
+    static uint8_t nextPwm;
+#endif
 	static uint8_t periodCounter;
 	static int16_t x0,x1,x2,x3,x4,x5,x6,x7,x8,x9;
 	Talkie *o = isrTalkptr;
@@ -186,7 +249,7 @@ static void timerInterrupt() {
 	int16_t u0,u1,u2,u3,u4,u5,u6,u7,u8,u9,u10;
 
 #if defined(__AVR__)
-	OCR2B = nextPwm;
+	PWM_VALUE_DESTINATION = nextPwm;
 	sei();
 #elif defined(__arm__) && defined(CORE_TEENSY)
 #if defined(__MKL26Z64__)
@@ -226,9 +289,13 @@ static void timerInterrupt() {
 	u4 = u5 - (((int16_t)synthK5*x4) >> 7);
 	u3 = u4 - (((int16_t)synthK4*x3) >> 7);
 	u2 = u3 - (((int16_t)synthK3*x2) >> 7);
-	u1 = u2 - (((int32_t)synthK2*x1) >> 15);
+#ifdef HIGHQUALITY
+    u1 = u2 - (((int32_t)synthK2*x1) >> 15);
 	u0 = u1 - (((int32_t)synthK1*x0) >> 15);
-
+#else
+    u1 = u2 - (((int16_t)synthK2*x1) >> 7); // K1 and K2 should be calculated with higher precision,
+    u0 = u1 - (((int16_t)synthK1*x0) >> 7); // but this is a speed shortcut.
+#endif
 	// Output clamp
 	if (u0 > 511) u0 = 511;
 	if (u0 < -512) u0 = -512;
@@ -245,8 +312,11 @@ static void timerInterrupt() {
 	x1 = x0 + (((int32_t)synthK1*u0) >> 15);
 	x0 = u0;
 
-	nextPwm = (u0>>2)+0x80;
-
+#if defined(__arm__) && defined(CORE_TEENSY)
+    nextPwm = u0;
+#else
+    nextPwm = (u0>>2)+0x80;
+#endif
 	if ( o->ptrAddr ) nextData++;	// if no sound don't run toward calling sayisr()
 	if (ISR_RATIO <= nextData) { nextData=0; sayisr(); }
 }
