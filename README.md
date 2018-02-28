@@ -5,11 +5,25 @@ Speech library for Arduino
 
 Quick start
 -----------
-[Download the .zip file from the link at the top of the page or click here.](https://github.com/PaulStoffregen/Talkie/zipball/master) Install the "talkie" directory in your Arduino / libraries directory. Restart the Arduino software, and pick one of the examples from the Talkie section. Program it onto a 168 or 328 based Arduino (Uno, Duemilanove or Diecimila - not a Mega or Leonardo).
+Download the .zip file from the link at the top of the page.
+Install the "talkie" directory in your Arduino / libraries directory. Restart the Arduino software, and pick one of the examples from the Talkie section. 
 
-Connect headphones or an audio amplifier to digital pin 3 on Arduino, or the DAC pin on Teensy.
+Connect headphones or an audio amplifier to digital pin 3 on Arduino, pin 9 and 10 on 
+Leonardo, Flora and Lilypad USB, or the DAC pin on Teensy.
 
-Note that currently, Talkie works only on 168 or 328 based Arduinos at 16MHz, and Teensy LC, 3.1 & 3.2. A reduced-CPU version for 8MHz devices with reduced speech quality is included in the [Solder Time 2 talkie project.](https://github.com/going-digital/st2_talkie)
+Note that currently, Talkie works  on 168 or 328 based Arduinos at 16MHz and with reduced clarity at 8MHz.
+It works on  Teensy LC, 3.1 & 3.2. 
+It is being tested on 32u4 devices by replacing the Timer2 PWM with Timer 4.
+    Teensy
+    Leonardo
+    Flora
+    Lilypad USB
+
+TODO:
+      update TimerInterrupt with support for ARM Zero devices
+      12-bit fidelity on Teensy
+      100bit fidelity on ARM Zero
+      Increase sample rate on ARM?
 
 
 Introduction
