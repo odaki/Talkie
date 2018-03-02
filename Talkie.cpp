@@ -1,6 +1,8 @@
 // Talkie library
 // Copyright 2011 Peter Knight
 // This code is released under GPLv2 license.
+// TEENSY 3.x support by Paul Stra et al.
+// ARM M0 support (Zero, Gemma M0 etc.) by Adrian Freed
 
 #if (ARDUINO >= 100)
 #include "Arduino.h"
@@ -15,12 +17,23 @@
 #endif
 
 #define FS 8000 // Speech engine sample rate
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-static void timerInterrupt();
-static uint8_t synthPeriod;
-static uint16_t synthEnergy;
-static int16_t synthK1,synthK2;
-static int8_t synthK3,synthK4,synthK5,synthK6,synthK7,synthK8,synthK9,synthK10;
+void timerInterrupt(void);
+#ifdef __cplusplus
+}
+#endif
+static volatile uint8_t synthPeriod;
+static volatile uint16_t synthEnergy;
+#ifdef HIGHQUALITY
+static volatile int16_t synthK1,synthK2;
+#else
+static volatile int8_t synthK1,synthK2;
+#endif
+
+static volatile int8_t synthK3,synthK4,synthK5,synthK6,synthK7,synthK8,synthK9,synthK10;
 
 static void sayisr();
 static Talkie *isrTalkptr;
@@ -124,6 +137,9 @@ const uint8_t * Talkie::say_remove() {
 const int PWM_PIN = 6;
 #define PWM_VALUE_DESTINATION     OCR4D
 //#elif (F_CPU==8000000l) // Lilypad USB FLORA and EXPRESS
+#elif defined(ARDUINO_AVR_CIRCUITPLAY)
+#define PWM_VALUE_DESTINATION     OCR4A
+const int PWM_PIN = 5;
 #else
 const int PWM_PIN = 10;
 #define PWM_COMPLEMENTARY 9
@@ -137,13 +153,83 @@ const int PWM_PIN = 3;
 
 #endif
 
+#if defined(__arm__) && !defined(CORE_TEENSY)
+static bool tcIsSyncing()
+{
+    return TC5->COUNT16.STATUS.reg & TC_STATUS_SYNCBUSY;
+}
+
+static void tcStartCounter()
+{
+    // Enable TC
+    
+    TC5->COUNT16.CTRLA.reg |= TC_CTRLA_ENABLE;
+    while (tcIsSyncing());
+}
+
+static void tcReset()
+{
+    // Reset TCx
+    TC5->COUNT16.CTRLA.reg = TC_CTRLA_SWRST;
+    while (tcIsSyncing());
+    while (TC5->COUNT16.CTRLA.bit.SWRST);
+}
+
+static void tcDisable()
+{
+    // Disable TC5
+    TC5->COUNT16.CTRLA.reg &= ~TC_CTRLA_ENABLE;
+    while (tcIsSyncing());
+}
+static void tcEnd() {
+    tcDisable();
+    tcReset();
+    analogWrite(DAC0, 0);
+    
+}
+
+static void tcConfigure(uint32_t sampleRate)
+{
+    // Enable GCLK for TCC2 and TC5 (timer counter input clock)
+    GCLK->CLKCTRL.reg = (uint16_t) (GCLK_CLKCTRL_CLKEN | GCLK_CLKCTRL_GEN_GCLK0 | GCLK_CLKCTRL_ID(GCM_TC4_TC5)) ;
+    while (GCLK->STATUS.bit.SYNCBUSY);
+    
+    tcReset();
+    
+    // Set Timer counter Mode to 16 bits
+    TC5->COUNT16.CTRLA.reg |= TC_CTRLA_MODE_COUNT16;
+    
+    // Set TC5 mode as match frequency
+    TC5->COUNT16.CTRLA.reg |= TC_CTRLA_WAVEGEN_MFRQ;
+    
+    TC5->COUNT16.CTRLA.reg |= TC_CTRLA_PRESCALER_DIV1 | TC_CTRLA_ENABLE;
+    
+    TC5->COUNT16.CC[0].reg = (uint16_t) (SystemCoreClock / sampleRate - 1);
+    while (tcIsSyncing());
+    
+    // Configure interrupt request
+    NVIC_DisableIRQ(TC5_IRQn);
+    NVIC_ClearPendingIRQ(TC5_IRQn);
+    NVIC_SetPriority(TC5_IRQn, 0);
+    NVIC_EnableIRQ(TC5_IRQn);
+    
+    // Enable the TC5 interrupt request
+    TC5->COUNT16.INTENSET.bit.MC0 = 1;
+    while (tcIsSyncing());
+}	
+
+#endif
 
 int8_t Talkie::sayQ(const uint8_t * addr) {
 	if (!setup) {
 		// Auto-setup.
 		// 
 		// Enable the speech system whenever say() is called.
-
+        
+        pinMode(PWM_PIN,OUTPUT);
+#ifdef PWM_COMPLEMENTARY
+        pinMode( PWM_COMPLEMENTARY, OUTPUT);
+#endif
         
 #if defined(__AVR__)
 #if defined(__AVR_ATmega32U4__)
@@ -157,14 +243,26 @@ int8_t Talkie::sayQ(const uint8_t * addr) {
         //  TCCR4E= _BV(ENHC4);
         //        TIMSK4 =_BV(TOIE4);
         TIMSK4 = 0;
+#elif defined(ARDUINO_AVR_CIRCUITPLAY)
+        // Set up Timer4 for fast PWM on !OC4A
+        PLLFRQ  = (PLLFRQ & 0xCF) | 0x30;   // Route PLL to async clk
+        TCCR4A  = _BV(COM4A0) | _BV(PWM4A); // Clear on match, PWMA on
+        TCCR4B  = _BV(PWM4X)  |_BV(CS40);   // PWM invert, 1:1 prescale
+        TCCR4D  = 0;                        // Fast PWM mode
+        TCCR4E  = 0;                        // Not enhanced mode
+        TC4H    = 0;                        // Not 10-bit mode
+        DT4     = 0;                        // No dead time
+        OCR4C   = 255;                      // TOP
+        OCR4A   = 127;                      // 50% duty (idle position) to start
 #else
-    
         TCCR4A =  _BV(COM4B1 )|_BV(PWM4B);
         TCCR4B = _BV(CS40);
-        OCR4C = 0;
+        OCR4C = 0xff;
         TCCR4D = 0;
         TC4H = 0x0;
-          TCCR4E= _BV(ENHC4);
+        TCCR4E= 0;
+
+        //  TCCR4E= _BV(ENHC4);
         //TIMSK4 =_BV(TOIE4);
         TIMSK4 = 0;
 #endif
@@ -177,9 +275,10 @@ int8_t Talkie::sayQ(const uint8_t * addr) {
 		TCCR2A = _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
 		TCCR2B = _BV(CS20);
 		TIMSK2 = 0;
-		// Unfortunately we can't calculate the next sample every PWM cycle
+#endif
+        // Unfortunately we can't calculate the next sample every PWM cycle
 		// as the routine is too slow. So use Timer 1 to trigger that.
-		
+
 		// Timer 1 set up as a 8000Hz sample interrupt
 		TCCR1A = 0;
 		TCCR1B = _BV(WGM12) | _BV(CS10);
@@ -187,25 +286,41 @@ int8_t Talkie::sayQ(const uint8_t * addr) {
 		OCR1A = F_CPU / FS;
 		TIMSK1 = _BV(OCIE1A);
 #endif
-        pinMode(PWM_PIN,OUTPUT);
-#ifdef PWM_COMPLEMENTARY
-        pinMode( PWM_COMPLEMENTARY, OUTPUT);
-#endif
 
-#endif
+#define ISR_RATIO (25000/ (1000000.0f / (float)FS) )
         
 #if defined(__AVR__)
-#define ISR_RATIO (25000/ (F_CPU / FS) )
-#elif defined(__arm__) && defined(CORE_TEENSY)
+#elif defined(__arm__)
+#if defined(CORE_TEENSY)
 #define ISR(f) void f(void)
+        analogWriteResolution(12);
 		IntervalTimer *t = new IntervalTimer();
 		t->begin(timerInterrupt, 1000000.0f / (float)FS);
-#define ISR_RATIO (25000/ (1000000.0f / (float)FS) )
+
+#else
+        // ARM Zero?
+#define ISR(f) void f(void)
+#ifdef ARDUINO_SAMD_CIRCUITPLAYGROUND_EXPRESS
+        {
+                static const int CPLAY_SPEAKER_SHUTDOWN= 11;
+            pinMode(CPLAY_SPEAKER_SHUTDOWN, OUTPUT);
+            digitalWrite(CPLAY_SPEAKER_SHUTDOWN, HIGH);
+        }
+
+#endif
+        analogWriteResolution(10);
+        analogWrite(DAC0, 0);
+        tcConfigure(FS);
+#endif
 #endif
 		isrTalkptr = this;
 		head = 0;
 		tail = 0;
 		free = SAY_BUFFER_SIZE;
+        
+#if defined(__arm__) && ! defined(CORE_TEENSY)
+        tcStartCounter();
+#endif
 
 		setup = 1;
 	}
@@ -232,35 +347,45 @@ int8_t Talkie::sayQ(const uint8_t * addr) {
 #define CHIRP_SIZE 41
 static uint8_t chirp[CHIRP_SIZE] = {0x00,0x2a,0xd4,0x32,0xb2,0x12,0x25,0x14,0x02,0xe1,0xc5,0x02,0x5f,0x5a,0x05,0x0f,0x26,0xfc,0xa5,0xa5,0xd6,0xdd,0xdc,0xfc,0x25,0x2b,0x22,0x21,0x0f,0xff,0xf8,0xee,0xed,0xef,0xf7,0xf6,0xfa,0x00,0x03,0x02,0x01};
 
+#if defined(__AVR__)
 ISR(TIMER1_COMPA_vect) {
 	timerInterrupt();
 }
-
-static void timerInterrupt() {
+#endif
 #if defined(__arm__) && defined(CORE_TEENSY)
-    static unsigned  nextPwm;
+#if defined(__MKL26Z64__)
+#define DAC0 A12
+#elif defined(__MK20DX128__) || defined(__MK20DX256__)
+#define DAC0 A14
+#elif defined(__MK64FX512__) || defined(__MK66FX1M0__)
+#define DAC0 A21
 #else
-    static uint8_t nextPwm;
+#error "Unknown Teensy"
+#endif
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void timerInterrupt(void) {
+#if defined(__arm__)
+    static uint16_t  nextPwm=0;
+#else
+    static uint8_t nextPwm=0;
 #endif
 	static uint8_t periodCounter;
 	static int16_t x0,x1,x2,x3,x4,x5,x6,x7,x8,x9;
-	Talkie *o = isrTalkptr;
 
 	int16_t u0,u1,u2,u3,u4,u5,u6,u7,u8,u9,u10;
+    Talkie *o = isrTalkptr;
 
 #if defined(__AVR__)
 	PWM_VALUE_DESTINATION = nextPwm;
 	sei();
-#elif defined(__arm__) && defined(CORE_TEENSY)
-#if defined(__MKL26Z64__)
-	analogWrite(A12, nextPwm);
-#elif defined(__MK20DX128__) || defined(__MK20DX256__)
-	analogWrite(A14, nextPwm);
-#elif defined(__MK64FX512__) || defined(__MK66FX1M0__)
-	analogWrite(A21, nextPwm);
-#else 
-	#error "Unknown Teensy"	
-#endif
+#elif defined(__arm__)
+	analogWrite(DAC0, nextPwm);
+
 #endif
 	if (synthPeriod) {
 		// Voiced source
@@ -280,48 +405,71 @@ static void timerInterrupt() {
 		synthRand = (synthRand >> 1) ^ ((synthRand & 1) ? 0xB800 : 0);
 		u10 = (synthRand & 1) ? synthEnergy : -synthEnergy;
 	}
+#ifdef CORE_TEENSY
+#define MPY 1
+#define RESSHIFT 0
+#else
+#define MPY 1
+#define RESSHIFT 0
+#endif
+
+    u10 <<= RESSHIFT;
+    
 	// Lattice filter forward path
-	u9 = u10 - (((int16_t)synthK10*x9) >> 7);
-	u8 = u9 - (((int16_t)synthK9*x8) >> 7);
-	u7 = u8 - (((int16_t)synthK8*x7) >> 7);
-	u6 = u7 - (((int16_t)synthK7*x6) >> 7);
-	u5 = u6 - (((int16_t)synthK6*x5) >> 7);
-	u4 = u5 - (((int16_t)synthK5*x4) >> 7);
-	u3 = u4 - (((int16_t)synthK4*x3) >> 7);
-	u2 = u3 - (((int16_t)synthK3*x2) >> 7);
+	u9 = u10 - (((int16_t)synthK10*x9) >> (8-1-RESSHIFT));
+	u8 = u9 - (((int16_t)synthK9*x8) >> (8-1-RESSHIFT));
+	u7 = u8 - (((int16_t)synthK8*x7) >> (8-1-RESSHIFT));
+	u6 = u7 - (((int16_t)synthK7*x6) >> (8-1-RESSHIFT));
+	u5 = u6 - (((int16_t)synthK6*x5) >> (8-1-RESSHIFT));
+	u4 = u5 - (((int16_t)synthK5*x4) >> (8-1-RESSHIFT));
+	u3 = u4 - (((int16_t)synthK4*x3) >> (8-1-RESSHIFT));
+	u2 = u3 - (((int16_t)synthK3*x2) >> (8-1-RESSHIFT));
 #ifdef HIGHQUALITY
-    u1 = u2 - (((int32_t)synthK2*x1) >> 15);
-	u0 = u1 - (((int32_t)synthK1*x0) >> 15);
+    u1 = u2 - (((int32_t)synthK2*x1) >> (8+8-1-RESSHIFT));
+	u0 = u1 - (((int32_t)synthK1*x0) >> (8+8-1-RESSHIFT));
 #else
     u1 = u2 - (((int16_t)synthK2*x1) >> 7); // K1 and K2 should be calculated with higher precision,
     u0 = u1 - (((int16_t)synthK1*x0) >> 7); // but this is a speed shortcut.
 #endif
 	// Output clamp
-	if (u0 > 511) u0 = 511;
-	if (u0 < -512) u0 = -512;
-
+    if (u0 > (511<<RESSHIFT)) u0 = (511<<RESSHIFT);
+    if (u0 < -1*(512<<RESSHIFT)) u0 = -1*(512<<RESSHIFT);
 	// Lattice filter reverse path
-	x9 = x8 + (((int16_t)synthK9*u8) >> 7);
-	x8 = x7 + (((int16_t)synthK8*u7) >> 7);
-	x7 = x6 + (((int16_t)synthK7*u6) >> 7);
-	x6 = x5 + (((int16_t)synthK6*u5) >> 7);
-	x5 = x4 + (((int16_t)synthK5*u4) >> 7);
-	x4 = x3 + (((int16_t)synthK4*u3) >> 7);
-	x3 = x2 + (((int16_t)synthK3*u2) >> 7);
-	x2 = x1 + (((int32_t)synthK2*u1) >> 15);
-	x1 = x0 + (((int32_t)synthK1*u0) >> 15);
+	x9 = x8 + (((int16_t)synthK9*u8) >> (8-1-RESSHIFT));
+	x8 = x7 + (((int16_t)synthK8*u7) >> (8-1-RESSHIFT));
+	x7 = x6 + (((int16_t)synthK7*u6) >> (8-1-RESSHIFT));
+	x6 = x5 + (((int16_t)synthK6*u5) >> (8-1-RESSHIFT));
+	x5 = x4 + (((int16_t)synthK5*u4) >> (8-1-RESSHIFT));
+	x4 = x3 + (((int16_t)synthK4*u3) >> (8-1-RESSHIFT));
+	x3 = x2 + (((int16_t)synthK3*u2) >> (8-1-RESSHIFT));
+#ifdef HIGHQUALITY
+    x2 = x1 + (((int32_t)synthK2*u1) >> (8+8-1-RESSHIFT));
+    x1 = x0 + (((int32_t)synthK1*u0) >> (8+8-1-RESSHIFT));
+#else
+    x2 = x1 + (((int16_t)synthK2*u1) >> 7);
+    x1 = x0 + (((int16_t)synthK1*u0) >> 7);
+#endif
 	x0 = u0;
 
-#if defined(__arm__) && defined(CORE_TEENSY)
-    nextPwm = u0;
+#if defined(__arm__)
+    nextPwm = u0*MPY+(512*MPY);
 #else
     nextPwm = (u0>>2)+0x80;
 #endif
 	if ( o->ptrAddr ) nextData++;	// if no sound don't run toward calling sayisr()
 	if (ISR_RATIO <= nextData) { nextData=0; sayisr(); }
+    
+#if defined(__arm__) && !defined(CORE_TEENSY)
+    TC5->COUNT16.INTFLAG.bit.MC0 = 1;
+#endif
 }
 
-
+#if defined(__arm__) && !defined(CORE_TEENSY)
+void TC5_Handler (void) __attribute__ ((weak, alias("timerInterrupt")));
+#endif
+#ifdef __cplusplus
+}
+#endif
 static void sayisr() {
 	uint8_t energy;
 	Talkie *o = isrTalkptr;
@@ -376,7 +524,12 @@ static void sayisr() {
 			}
 		}
 	}
-} // sayisr()
+}
+
+
+
+
+// sayisr()
 
 /*
 >> When sayQ brings new addr - if not .active() then start it { 'current code' } return (free);
