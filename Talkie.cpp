@@ -451,7 +451,7 @@ void timerInterrupt(void) {
     u0 = u1 - (((int16_t)synthK1*x0) >> 7); // but this is a speed shortcut.
 #endif
 	// Output clamp
-    if (u0 > ((512<<RESSHIFT)-1) u0 = ((512<<RESSHIFT)-1);
+    if (u0 > ((512<<RESSHIFT)-1)) u0 = ((512<<RESSHIFT)-1);
     if (u0 < -1*(512<<RESSHIFT)) u0 = -1*(512<<RESSHIFT);
 	// Lattice filter reverse path
 	x9 = x8 + (((int16_t)synthK9*u8) >> (8-1-RESSHIFT));
