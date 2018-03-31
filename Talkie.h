@@ -24,10 +24,10 @@ public:
 	const uint8_t * say_remove();	// sayisr() calls this
 private:
 	// Say queue
-	const uint8_t *  say_buffer[SAY_BUFFER_SIZE];
-	uint8_t head; // init on setup = 0
-	uint8_t tail; // init on setup = 0
-	uint8_t free; // init on setup = SAY_BUFFER_SIZE
+	 const uint8_t *  say_buffer[SAY_BUFFER_SIZE];
+	volatile uint8_t head; // init on setup = 0
+	volatile uint8_t tail; // init on setup = 0
+	volatile uint8_t free; // init on setup = SAY_BUFFER_SIZE
 	
 	// Setup
 	uint8_t setup;
