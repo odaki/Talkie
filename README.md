@@ -21,7 +21,7 @@ It is being tested on 32u4 devices by replacing the Timer2 PWM with Timer 4.
 
 It works on Adafruit SAMD51 board.
 * Feather M4 Express (with Prop wing)
-* Trellils M4
+* Trellis M4
 
 TODO:
 * update TimerInterrupt with support for ARM Zero devices
