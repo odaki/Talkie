@@ -18,11 +18,14 @@ It is being tested on 32u4 devices by replacing the Timer2 PWM with Timer 4.
     Leonardo
     Flora
     Lilypad USB
+It works on Adafruit SAMD51 board.
+    Feather M4 Express (with Prop wing)
+    Trellils M4
 
 TODO:
       update TimerInterrupt with support for ARM Zero devices
       12-bit fidelity on Teensy
-      100bit fidelity on ARM Zero
+      10-bit fidelity on ARM Zero
       Increase sample rate on ARM?
 
 
