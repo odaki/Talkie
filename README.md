@@ -14,19 +14,20 @@ Leonardo, Flora and Lilypad USB, or the DAC pin on Teensy.
 Note that currently, Talkie works  on 168 or 328 based Arduinos at 16MHz and with reduced clarity at 8MHz.
 It works on  Teensy LC, 3.1 & 3.2. 
 It is being tested on 32u4 devices by replacing the Timer2 PWM with Timer 4.
-    Teensy
-    Leonardo
-    Flora
-    Lilypad USB
+* Teensy
+* Leonardo
+* Flora
+* Lilypad USB
+
 It works on Adafruit SAMD51 board.
-    Feather M4 Express (with Prop-Maker FeatherWing)
-    Trellils M4
+* Feather M4 Express (with Prop-Maker FeatherWing)
+* Trellis M4
 
 TODO:
-      update TimerInterrupt with support for ARM Zero devices
-      12-bit fidelity on Teensy
-      10-bit fidelity on ARM Zero
-      Increase sample rate on ARM?
+* update TimerInterrupt with support for ARM Zero devices
+* 12-bit fidelity on Teensy
+* 10-bit fidelity on ARM Zero
+* Increase sample rate on ARM?
 
 
 Introduction
