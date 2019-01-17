@@ -20,7 +20,7 @@ It is being tested on 32u4 devices by replacing the Timer2 PWM with Timer 4.
 * Lilypad USB
 
 It works on Adafruit SAMD51 board.
-* Feather M4 Express (with Prop-Maker FeatherWing)
+* Feather M4 Express (with [Prop-Maker FeatherWing](https://www.adafruit.com/product/3988)
 * Trellis M4
 
 TODO:
